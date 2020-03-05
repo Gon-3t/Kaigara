@@ -1,6 +1,6 @@
 main: pl.gon_3t.kaigara.Kaigara
 name: "Kaigara"
-version: "1.5"
+version: "1.6"
 api-version: "1.15"
 
 commands: #自作プラグインのコマンドを宣言
