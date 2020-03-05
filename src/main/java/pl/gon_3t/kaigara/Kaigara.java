@@ -2,9 +2,7 @@ package pl.gon_3t.kaigara;
 
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.IllegalFormatException;
 import java.util.Map;
-import java.util.UUID;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Sound;
@@ -25,48 +23,8 @@ import org.bukkit.inventory.meta.BlockStateMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class Kaigara extends JavaPlugin implements Listener {
-    static final String prefix_pl="§5[§d開殻§5]§f";
-    static final String prefix_error="§4";
-    static final String version = "1.4";
-    static final int MSG_HELP=0;
-    static final int MSG_UNKNOWN_COMMAND=1;
-    static final int MSG_SHULKER_OPEN=2;
-    static final int MSG_SHULKER_SAVED=3;
-    static final int MSG_SHULKER_NOTSAVED=4;
-    static final int MSG_SHULKER_ANOTHER_ONE=5;
-    static final int MSG_CANTOPEN_IT=6;
-    static final int MSG_NULL=7;
-    static final String[] messages_jp={
-        prefix_pl+"使い方：開けたいｼｭﾙｶｰﾎﾞｯｸｽを手に持ち、クリックもしくは\"/kaigara open\"を実行します。",
-        prefix_pl+prefix_error+"エラー：不明なコマンドです。\"/kaigara help\"で利用方法を確認できます。",
-        prefix_pl+"%sを開きます。",
-        prefix_pl+"%sに内容を保存しました。",
-        prefix_pl+prefix_error+"エラー：シュルカーボックスを保存できませんでした。",
-        prefix_pl+prefix_error+"エラー：持っているｼｭﾙｶｰﾎﾞｯｸｽが異なります。内容は保障されません。",
-        prefix_pl+prefix_error+"エラー：それを開くことはできません。",
-        prefix_pl+prefix_error+"エラー：null。"
-    };
-    static final String[] messages_en={
-        prefix_pl+"How to use: Hold the shulker box that you want to open, then punch it or type command \"/kaigara open\".",
-        prefix_pl+prefix_error+"Error: Unknown command. type \"/kaigara help\" to show help.",
-        prefix_pl+"Opening %s.",
-        prefix_pl+"Contents has been saved to %s.",
-        prefix_pl+prefix_error+"Error: Couldn't save contents to the shulker box.",
-        prefix_pl+prefix_error+"Error: You have another box in your hand. The contents won't be guaranteed.",
-        prefix_pl+prefix_error+"Error: You can't open it.",
-        prefix_pl+prefix_error+"Error: null"
-    };
-    //プレイヤーごとのマップ多すぎ問題。クラス作ろうかな...
-    //プレイヤーごとにシェルカーを開けているかどうか保持
-    Map<UUID, Boolean> opening = new HashMap<UUID, Boolean>();
-    //プレイヤーごとにドア開扉時の暴発防止用フラグを保持
-    Map<UUID, Boolean> checkhand = new HashMap<UUID, Boolean>();
-    //プレイヤーごとに手持ちの正当性の検証用フラグを保持
-    Map<UUID, Boolean> checkdoor = new HashMap<UUID, Boolean>();
-    //プレイヤーごとに手持ちの正当性の検証用フラグを保持
-    Map<UUID, String> usingboxname = new HashMap<UUID, String>();
-    //プレイヤーごとに開いた段階のシュルカー内容物を保持
-    Map<UUID, ItemStack[]> usingbox = new HashMap<UUID, ItemStack[]>();
+    static final String version = "1.5";
+    Map<Player, PlayerData> users = new HashMap<Player, PlayerData>();
 
     @Override
     public void onEnable(){
@@ -88,47 +46,48 @@ public class Kaigara extends JavaPlugin implements Listener {
             }
             // ヘルプ(h,help)
             else if(args[0].equalsIgnoreCase("h")||args[0].equalsIgnoreCase("help")){
-                sendLocalizedMessage(getServer().getPlayer(sender.getName()), MSG_HELP);
+                Messanger.sendLocalizedMessage(getServer().getPlayer(sender.getName()), Messanger.MSG_HELP);
             }
             // それ以外
             else{
-                sendLocalizedMessage(getServer().getPlayer(sender.getName()), MSG_UNKNOWN_COMMAND);
+                Messanger.sendLocalizedMessage(getServer().getPlayer(sender.getName()), Messanger.MSG_UNKNOWN_COMMAND);
             }
         }
         //引数なし
-        sendLocalizedMessage(getServer().getPlayer(sender.getName()), MSG_HELP);
+        Messanger.sendLocalizedMessage(getServer().getPlayer(sender.getName()), Messanger.MSG_HELP);
         return true;
     }
    
     @EventHandler
     public void onPlayerInteract(PlayerInteractEvent e){
-        //プレイヤーのUUID取得
-        UUID uuid=e.getPlayer().getUniqueId();
+        Player p = e.getPlayer();
         //ドア開けた後ターゲットが空気だとRIGHT_CLICK_BLOCKの直後にLEFT_CLICK_AIRが2回発動する
         //そのため、RIGHT_CLICK_BLOCKが発動した後の一瞬シェルカーオープンを無効にする
         if(e.getAction()==Action.RIGHT_CLICK_BLOCK){
+            //まだPlayerDataがなければ追加
+            if(!users.containsKey(p))users.put(p, new PlayerData());
             //プレイヤーのチェックドアをtrueに
-            checkdoor.put(e.getPlayer().getUniqueId(),true);
-            //2ﾃｨｯｸ後に解除(2ﾃｨｯｸが最適とは限らない)
+            users.get(p).checkdoor=true;
+            //10ﾃｨｯｸ後に解除(10ﾃｨｯｸが最適とは限らない)
             getServer().getScheduler().scheduleSyncDelayedTask(this, new Runnable() {
                 public void run() {
-                    checkdoor.put(e.getPlayer().getUniqueId(),false);
+                    users.get(p).checkdoor=false;
                 }
-            }, 15L);
+            }, 10L);
         }
         //シェルカーボックスを手に持った状態で任意のブロックを左クリック
         else if(e.getAction()==Action.LEFT_CLICK_AIR||e.getAction()==Action.LEFT_CLICK_BLOCK){
-            if(checkdoor.containsKey(uuid)){
-                if(checkdoor.get(uuid)){
+            if(users.containsKey(p)){
+                if(users.get(p).checkdoor){
                     //プレイヤーのチェックドアフラグが有効な場合は何もしない
                     return;
                 }
             }
             if(e.getItem()!=null){
+                //持ってるものがnullでなく、ｼｭﾙｶｰﾎﾞｯｸｽならKaigaraOpen
                 if(e.getItem().getItemMeta() instanceof BlockStateMeta){
                     if(((BlockStateMeta) e.getItem().getItemMeta()).getBlockState() instanceof ShulkerBox){
-                        //kaigaraOpenを入れる
-                        kaigaraOpen(e.getPlayer(),e);
+                        kaigaraOpen(p, e);
                     }
                 }
             }    
@@ -139,18 +98,26 @@ public class Kaigara extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onGuiClose(InventoryCloseEvent e){
-        UUID uuid=e.getPlayer().getUniqueId();
+        Player p = getServer().getPlayer(e.getPlayer().getUniqueId());
         //ｼｭﾙｶｰをあけているプレイヤーがGUIを閉じた時
-        if(opening.containsKey(uuid)){
-            if(opening.get(uuid)){
+        if(users.containsKey(p)){
+            if(users.get(p).opening){
                 ItemStack box = e.getPlayer().getInventory().getItemInMainHand();
-                opening.put(uuid, false);
-                checkhand.put(uuid, false);
+                users.get(p).opening=false;
+                users.get(p).checkhand=false;
                 if(box.getItemMeta() instanceof BlockStateMeta){
                     BlockStateMeta blockMeta = (BlockStateMeta) box.getItemMeta();
                     if(blockMeta.getBlockState() instanceof ShulkerBox){
                         ShulkerBox shulker = (ShulkerBox) blockMeta.getBlockState();
-                        if(Arrays.equals(usingbox.get(uuid),shulker.getInventory().getContents())){
+                        if(users.get(p).usingbox==null){
+                            //usingboxがnull
+                            getLogger().info("usingbox for "+p.getName()+" is null!!");
+                            Messanger.sendLocalizedMessage(p, Messanger.MSG_NULL);
+                            Messanger.sendLocalizedMessage(p, Messanger.MSG_SHULKER_NOTSAVED);
+                            return;
+                        }
+                        //現在の手持ちのボックスとそれを開いた時点での中身が一致しているか
+                        if(Arrays.equals(users.get(p).usingbox,shulker.getInventory().getContents())){
                             Inventory inv = e.getInventory();
                             shulker.getInventory().setContents(inv.getContents());
                             blockMeta.setBlockState(shulker);
@@ -165,31 +132,38 @@ public class Kaigara extends JavaPlugin implements Listener {
                                 dispname = box.getItemMeta().getLocalizedName();
                                 //どちらでもなければdispnameの初期値をそのまま使用
                             }
-                            getServer().getPlayer(uuid).playSound(getServer().getPlayer(uuid).getLocation(), Sound.BLOCK_SHULKER_BOX_CLOSE, 0.5f, 0.9f+(float)Math.random()*0.1f);
-                            sendLocalizedMessage(getServer().getPlayer(uuid), MSG_SHULKER_SAVED, dispname);
+                            //少しクールダウンを入れる
+                            users.get(p).checkdoor=true;
+                            getServer().getScheduler().scheduleSyncDelayedTask(this, new Runnable() {
+                                public void run() {
+                                    users.get(p).checkdoor=false;
+                                }
+                            }, 10L);
+                            p.playSound(p.getLocation(), Sound.BLOCK_SHULKER_BOX_CLOSE, 0.5f, 0.9f+(float)Math.random()*0.1f);
+                            Messanger.sendLocalizedMessage(p, Messanger.MSG_SHULKER_SAVED, dispname);
                         }else{
-                            sendLocalizedMessage(getServer().getPlayer(uuid), MSG_SHULKER_NOTSAVED);
+                            Messanger.sendLocalizedMessage(p, Messanger.MSG_SHULKER_NOTSAVED);
                         }
                     }
                 }
             }
+        }else{
+            //まだPlayerDataがなければ追加
+            if(!users.containsKey(p))users.put(p, new PlayerData());
         }
     }
 
     @EventHandler
     public void onInventoryMoved(InventoryClickEvent e){
-        UUID uuid=e.getWhoClicked().getUniqueId();
+        Player p = getServer().getPlayer(e.getWhoClicked().getUniqueId());
         ItemStack mainhand = e.getWhoClicked().getInventory().getItemInMainHand();
-        if(opening.containsKey(uuid)){
-            if(opening.get(uuid)){
-                if(!checkhand.containsKey(uuid)){
-                    checkhand.put(uuid,false);
-                }
-                //まだ正当性が未確認であれば
-                if(!checkhand.get(uuid)){
+        if(users.containsKey(p)){
+            //プレイヤーがKaigaraOpenでｼｭﾙｶｰﾎﾞｯｸｽを開けている
+            if(users.get(p).opening){
+                //まだ正当性が未確認(checkhand==false)であればここで確認
+                if(!users.get(p).checkhand){
                     if(!(e.getClick()==ClickType.LEFT||e.getClick()==ClickType.RIGHT)){
                         //アイテム増殖およびロスト防止の為最初は通常のクリック以外禁止
-                        //ほんとは他のクリックイベントハンドルした方がいいかも。
                         e.setCancelled(true);
                         return;
                     }
@@ -197,45 +171,48 @@ public class Kaigara extends JavaPlugin implements Listener {
                         //手に何も持っていないのに開けている場合の例外処理
                         e.setCancelled(true);
                         e.getWhoClicked().closeInventory();
-                        e.getWhoClicked().sendMessage(prefix_pl+prefix_error+"エラー：null。");
-                        opening.put(uuid, false);
+                        e.getWhoClicked().sendMessage(Messanger.prefix_pl+Messanger.prefix_error+"エラー：null。");
+                        users.get(p).opening=false;
                         return;
                     }else if(mainhand.getItemMeta() instanceof BlockStateMeta){
                         BlockStateMeta blockMeta = (BlockStateMeta) mainhand.getItemMeta();
                         if(blockMeta.getBlockState() instanceof ShulkerBox){
                             //正しいｼｭﾙｶｰﾎﾞｯｸｽか?
                             ShulkerBox shulker = (ShulkerBox) blockMeta.getBlockState();
-                            if(!Arrays.equals(usingbox.get(uuid),shulker.getInventory().getContents())){
+                            if(!Arrays.equals(users.get(p).usingbox,shulker.getInventory().getContents())){
                                 //開けた時とは中身が異なるｼｭﾙｶｰﾎﾞｯｸｽを持っている
                                 //ｼｭﾙｶｰﾎﾞｯｸｽの名前とかでも判定したほうがいいかも
                                 //アイテムにuuidとか…ないか
                                 e.setCancelled(true);
                                 e.getWhoClicked().closeInventory();
-                                sendLocalizedMessage(getServer().getPlayer(uuid), MSG_SHULKER_ANOTHER_ONE);
-                                opening.put(uuid, false);
+                                Messanger.sendLocalizedMessage(p, Messanger.MSG_SHULKER_ANOTHER_ONE);
+                                users.get(p).opening=false;
                                 return;
                             }
                         }else{
                             //持っているものがｼｭﾙｶｰﾎﾞｯｸｽでない
                             e.setCancelled(true);
                             e.getWhoClicked().closeInventory();
-                            sendLocalizedMessage(getServer().getPlayer(uuid), MSG_CANTOPEN_IT);
-                            opening.put(uuid, false);
+                            Messanger.sendLocalizedMessage(p, Messanger.MSG_CANTOPEN_IT);
+                            users.get(p).opening=false;
                             return;
                         }
                     }else{
                         //手に持っているアイテムはBlockStateMetaのインスタンスではない
                         e.setCancelled(true);
                         e.getWhoClicked().closeInventory();
-                        sendLocalizedMessage(getServer().getPlayer(uuid), MSG_CANTOPEN_IT);
-                        opening.put(uuid, false);
+                        Messanger.sendLocalizedMessage(p, Messanger.MSG_CANTOPEN_IT);
+                        users.get(p).opening=false;
                         return;
                     }
-                    //ここまで引っかからなければ正当と判断、フラグを真に
+                    //ここまでreturnに引っかからなければ正当と判断、フラグを真に
                     //以降、インベントリを閉じるまでこのチェックは省く
-                    checkhand.put(uuid,true);
+                    users.get(p).checkhand=true;
                 }
+
+                //ｼｭﾙｶｰﾎﾞｯｸｽの移動をはじく部分
                 ItemStack item = null;
+                //数字キー移動の対象がシュルカーボックスなら
                 if(e.getClick()==ClickType.NUMBER_KEY){
                     item = e.getWhoClicked().getInventory().getContents()[e.getHotbarButton()];
                     if(item!=null){
@@ -258,13 +235,14 @@ public class Kaigara extends JavaPlugin implements Listener {
                     }
                 }
             }
+        }else{
+            //まだPlayerDataがなければ追加
+            if(!users.containsKey(p))users.put(p, new PlayerData());
         }
     }
 
 
     private boolean kaigaraOpen(Player p, PlayerInteractEvent e){
-        //プレイヤーのUUID取得
-        UUID uuid=p.getUniqueId();
         //手持ちのアイテムを取得
         ItemStack box = p.getInventory().getItemInMainHand();
         //空でなければ
@@ -274,9 +252,10 @@ public class Kaigara extends JavaPlugin implements Listener {
                 if(blockMeta.getBlockState() instanceof ShulkerBox){
                     //クリックイベントがあればキャンセル
                     if(e!=null)e.setCancelled(true);
-                    
+                    //まだPlayerDataがなければ追加
+                    if(!users.containsKey(p))users.put(p, new PlayerData());
                     //プレイヤーのｼｭﾙｶｰ開封フラグをオン
-                    opening.put(uuid, true);
+                    users.get(p).opening=true;
                     //GUIのタイトルについて
                     String dispname = "Shulker Box";
                     if(blockMeta.hasDisplayName()){
@@ -291,43 +270,25 @@ public class Kaigara extends JavaPlugin implements Listener {
                     Inventory inv = Bukkit.createInventory(p, 27, dispname);
                     ShulkerBox shulker = (ShulkerBox) blockMeta.getBlockState();
                     //正当性検査用のハッシュマップを保管
-                    usingbox.put(uuid,shulker.getInventory().getContents());
-                    usingboxname.put(uuid,dispname);
+                    users.get(p).usingbox=shulker.getInventory().getContents();
+                    users.get(p).usingboxname=dispname;
                     //シュルカーの中身を入れたインベントリを用意
                     inv.setContents(shulker.getInventory().getContents());
                     //プレイヤーにGUIを見せる
                     p.openInventory(inv);
                     p.playSound(p.getLocation(), Sound.BLOCK_SHULKER_BOX_OPEN, 0.5f, 0.9f+(float)Math.random()*0.1f);
-                    sendLocalizedMessage(getServer().getPlayer(uuid), MSG_SHULKER_OPEN, dispname);
+                    Messanger.sendLocalizedMessage(p, Messanger.MSG_SHULKER_OPEN, dispname);
                 }else{
-                    sendLocalizedMessage(getServer().getPlayer(uuid), MSG_CANTOPEN_IT);
+                    Messanger.sendLocalizedMessage(p, Messanger.MSG_CANTOPEN_IT);
                 }
             }else{
-                sendLocalizedMessage(getServer().getPlayer(uuid), MSG_CANTOPEN_IT);
+                Messanger.sendLocalizedMessage(p, Messanger.MSG_CANTOPEN_IT);
             }
         }else{
-            sendLocalizedMessage(getServer().getPlayer(uuid), MSG_NULL);
+            Messanger.sendLocalizedMessage(p, Messanger.MSG_NULL);
             return true;
         }
         return false;
-    }
-    private void sendLocalizedMessage(Player p, int id){
-        if(p.getLocale().equals("ja_jp")){
-            p.sendMessage(messages_jp[id]);
-        }else{
-            p.sendMessage(messages_en[id]);
-        }
-    }
-    private void sendLocalizedMessage(Player p, int id ,String ... args){
-        try{
-            if(p.getLocale().equals("ja_jp")){
-                p.sendMessage(String.format(messages_jp[id],(Object[])args));
-            }else{
-                p.sendMessage(String.format(messages_en[id],(Object[])args));
-            }
-        }catch(IllegalFormatException e){
-            sendLocalizedMessage(p, id);
-        }
     }
 }
 
@@ -336,5 +297,8 @@ public class Kaigara extends JavaPlugin implements Listener {
 //＞増殖やロストの元凶。開いた後の初回インベントリ操作で正当性を確認するように。
 //上に関連して、シュルカーを開いた後Shiftクリックや数字キーで移動できてしまうアイテムの幻影をつかむと実体化する
 //＞開いた直後はクリック以外のアイテム操作を無効にした。本当はインベントリを閉じるのを遅らせたほうがいいのかも。
-//シュルカーもってドア開けた後ターゲットブロックが空気になると右クリックイベントにつづいて左クリックイベントが2回発生する
-//右クリック後一定時間左クリックイベントに反応しないようにすることで回避ただしラグによっては発動してしまう。
+
+//更新履歴
+//v1.5 - HashMapのキーをUUIDからPlayerに変更、プレイヤー毎のデータやSendMessage用のString定数をクラスにまとめた
+//       クラスを分けたついでにファイルも分割してみた
+//       takatronixさんアドバイスありがとうございます！
